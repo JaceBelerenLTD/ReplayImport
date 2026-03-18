@@ -1,0 +1,15 @@
+{
+  "name": "replay-import",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "build:api": "npm --workspace @replay-import/api run build",
+    "build:web": "npm --workspace @replay-import/web run build",
+    "dev:api": "npm --workspace @replay-import/api run dev",
+    "dev:web": "npm --workspace @replay-import/web run dev"
+  }
+}
