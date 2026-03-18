@@ -18,6 +18,61 @@ type ViewTab = "replay" | "debug";
 
 const PANEL_HEIGHT = "calc(100vh - 140px)";
 
+type PlayerMmdStats = {
+  entries: Array<{ key: string; value: string }>;
+  flag?: string;
+};
+
+const MMD_STAT_PRIORITY = [
+  "value",
+  "income",
+  "lumberjack",
+  "gold_total",
+  "lumber_total",
+  "Push",
+  "round_lumber_1",
+  "round_lumber_2",
+  "round_lumber_3",
+  "round_lumber_4",
+  "round_lumber_5",
+  "round_lumber_6",
+  "Rating_1",
+  "Rating_2",
+  "Rating_3",
+  "Rating_4",
+] as const;
+
+function formatMmdValue(value: number | string | undefined) {
+  if (value == null) return "—";
+  return String(value);
+}
+
+function getPlayerMmdStats(parsed: ParsedReplay | null, player: ReplayPlayer | null): PlayerMmdStats | null {
+  if (!parsed || !player) return null;
+  const mmdPid = typeof player.mmdPid === "number" ? player.mmdPid : undefined;
+  const lookupPid = mmdPid ?? player.pid;
+  const vars = parsed.mmd?.varsByPid?.[lookupPid];
+  const flag = parsed.mmd?.flagsByPid?.[lookupPid];
+  if (!vars && !flag) return null;
+
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const key of MMD_STAT_PRIORITY) {
+    if (vars && Object.prototype.hasOwnProperty.call(vars, key)) {
+      keys.push(key);
+      seen.add(key);
+    }
+  }
+  if (vars) {
+    for (const key of Object.keys(vars).sort((a, b) => a.localeCompare(b))) {
+      if (!seen.has(key)) keys.push(key);
+    }
+  }
+
+  const entries = keys.map((key) => ({ key, value: formatMmdValue(vars?.[key]) }));
+  return { entries, flag };
+}
+
 function fileSummaryLabel(parsed: ParsedReplay) {
   const map = parsed.meta?.map ?? "unknown map";
   const duration = fmtDuration(parsed.meta?.durationSec);
@@ -49,14 +104,16 @@ function playerSort(a: ReplayPlayer, b: ReplayPlayer) {
   return a.name.localeCompare(b.name);
 }
 
-function PlayerPill({ p }: { p: ReplayPlayer }) {
+function PlayerPill({ p, active, onClick }: { p: ReplayPlayer; active?: boolean; onClick?: () => void }) {
   const color = p.colorHex ?? "#999";
   const result = String(p.result ?? "").toLowerCase();
   const winner = result === "winner" || p.isWinner === true;
   const loser = !!result && result !== "winner";
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
       style={{
         display: "grid",
         gridTemplateColumns: "18px 1fr auto",
@@ -64,8 +121,11 @@ function PlayerPill({ p }: { p: ReplayPlayer }) {
         gap: 10,
         padding: "8px 10px",
         borderRadius: 10,
-        background: "rgba(255,255,255,0.03)",
-        boxShadow: "0 0 0 1px rgba(255,255,255,0.06)",
+        background: active ? "rgba(37,99,235,0.18)" : "rgba(255,255,255,0.03)",
+        boxShadow: active ? "0 0 0 1px rgba(37,99,235,0.75)" : "0 0 0 1px rgba(255,255,255,0.06)",
+        border: 0,
+        width: "100%",
+        textAlign: "left",
       }}
     >
       <div
@@ -108,17 +168,30 @@ function PlayerPill({ p }: { p: ReplayPlayer }) {
           {p.team === 0 ? "WEST" : p.team === 1 ? "EAST" : `T${p.team}`}
         </div>
       ) : null}
-    </div>
+    </button>
   );
 }
 
-function PlayersPanel({ players }: { players: ReplayPlayer[] }) {
+function PlayersPanel({
+  parsed,
+  players,
+  selectedPlayerPid,
+  onSelectPlayer,
+}: {
+  parsed: ParsedReplay;
+  players: ReplayPlayer[];
+  selectedPlayerPid?: number | null;
+  onSelectPlayer?: (pid: number) => void;
+}) {
   const visiblePlayers = useMemo(() => players.filter((p) => !p.isComputer), [players]);
 
   const winners = useMemo(
     () => visiblePlayers.filter((p) => !p.isObserver && (String(p.result ?? "").toLowerCase() === "winner" || p.isWinner === true)),
     [visiblePlayers],
   );
+
+  const selectedPlayer = useMemo(() => visiblePlayers.find((p) => p.pid === selectedPlayerPid) ?? null, [selectedPlayerPid, visiblePlayers]);
+  const selectedStats = useMemo(() => getPlayerMmdStats(parsed, selectedPlayer), [parsed, selectedPlayer]);
 
   const { west, east, observers, other } = useMemo(() => {
     const west: ReplayPlayer[] = [];
@@ -168,32 +241,92 @@ function PlayersPanel({ players }: { players: ReplayPlayer[] }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, alignItems: "start" }}>
             <div className="stack">
               <div className="small" style={{ fontWeight: 700 }}>West</div>
-              {west.length ? west.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} />) : <span className="muted">None</span>}
+              {west.length ? west.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} active={selectedPlayerPid === p.pid} onClick={() => onSelectPlayer?.(p.pid)} />) : <span className="muted">None</span>}
             </div>
 
             <div className="stack">
               <div className="small" style={{ fontWeight: 700 }}>East</div>
-              {east.length ? east.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} />) : <span className="muted">None</span>}
+              {east.length ? east.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} active={selectedPlayerPid === p.pid} onClick={() => onSelectPlayer?.(p.pid)} />) : <span className="muted">None</span>}
             </div>
           </div>
 
           {other.length ? (
             <div className="stack">
               <div className="small" style={{ fontWeight: 700 }}>Players</div>
-              {other.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} />)}
+              {other.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} active={selectedPlayerPid === p.pid} onClick={() => onSelectPlayer?.(p.pid)} />)}
             </div>
           ) : null}
 
           {observers.length ? (
             <div className="stack">
               <div className="small" style={{ fontWeight: 700 }}>Observers</div>
-              {observers.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} />)}
+              {observers.map((p) => <PlayerPill key={`${p.pid ?? p.id ?? p.name}`} p={p} active={selectedPlayerPid === p.pid} onClick={() => onSelectPlayer?.(p.pid)} />)}
             </div>
           ) : null}
         </div>
       ) : (
         <span className="muted">No players found.</span>
       )}
+
+      <div className="stack" style={{ marginTop: 4 }}>
+        <div>
+          <h3>MMD stats</h3>
+          <div className="small muted">Click a player name to inspect the parsed VarP values.</div>
+        </div>
+
+        {!selectedPlayer ? (
+          <span className="muted">Select a player to view MMD stats.</span>
+        ) : !selectedStats?.entries.length && !selectedStats?.flag ? (
+          <span className="muted">No MMD stats found for {selectedPlayer.name}.</span>
+        ) : (
+          <div className="stack">
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.03)",
+                boxShadow: "0 0 0 1px rgba(255,255,255,0.06)",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700 }}>{selectedPlayer.name}</div>
+                <div className="small muted">
+                  MMD pid {selectedPlayer.mmdPid ?? "—"}
+                  {typeof selectedPlayer.team === "number" ? ` • ${selectedPlayer.team === 0 ? "WEST" : selectedPlayer.team === 1 ? "EAST" : `T${selectedPlayer.team}`}` : ""}
+                </div>
+              </div>
+              {selectedStats?.flag ? <span className="badge">{selectedStats.flag}</span> : null}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                gap: 10,
+              }}
+            >
+              {selectedStats?.entries.map((entry) => (
+                <div
+                  key={entry.key}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "rgba(2,6,23,0.9)",
+                    border: "1px solid #334155",
+                  }}
+                >
+                  <div className="small muted" style={{ marginBottom: 6 }}>{entry.key}</div>
+                  <div style={{ fontWeight: 700, wordBreak: "break-word" }}>{entry.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -282,6 +415,7 @@ export default function ReplayInspectorPage({ onParsedReplay, onRankingsChanged 
   const [autoIngest, setAutoIngest] = useState(true);
   const [ingestErrors, setIngestErrors] = useState<ParseErrorEntry[]>([]);
   const [viewTab, setViewTab] = useState<ViewTab>("replay");
+  const [selectedPlayerPid, setSelectedPlayerPid] = useState<number | null>(null);
 
   const parsed = useMemo(
     () => (activeReplayIndex >= 0 ? parsedReplays[activeReplayIndex] ?? null : null),
@@ -308,6 +442,8 @@ export default function ReplayInspectorPage({ onParsedReplay, onRankingsChanged 
 
           nextParsed.push(next);
           nextActiveReplayIndex = nextParsed.length - 1;
+          const firstSelectable = next.players.find((p) => !p.isObserver && !p.isComputer) ?? next.players.find((p) => !p.isComputer) ?? null;
+          setSelectedPlayerPid(firstSelectable?.pid ?? null);
 
           if (autoIngest) {
             setBusyLabel(`Ingesting ${file.name}…`);
@@ -353,6 +489,8 @@ export default function ReplayInspectorPage({ onParsedReplay, onRankingsChanged 
     setActiveReplayIndex(index);
     setViewTab("replay");
     const next = parsedReplays[index];
+    const firstSelectable = next?.players.find((p) => !p.isObserver && !p.isComputer) ?? next?.players.find((p) => !p.isComputer) ?? null;
+    setSelectedPlayerPid(firstSelectable?.pid ?? null);
     if (next) onParsedReplay?.(next);
   }
 
@@ -362,6 +500,7 @@ export default function ReplayInspectorPage({ onParsedReplay, onRankingsChanged 
     setParseErrors([]);
     setIngestErrors([]);
     setViewTab("replay");
+    setSelectedPlayerPid(null);
     onParsedReplay?.(null);
   }
 
@@ -566,7 +705,7 @@ export default function ReplayInspectorPage({ onParsedReplay, onRankingsChanged 
                 </div>
               ) : null}
 
-              <PlayersPanel players={parsed.players} />
+              <PlayersPanel parsed={parsed} players={parsed.players} selectedPlayerPid={selectedPlayerPid} onSelectPlayer={setSelectedPlayerPid} />
               <ChatPanel chat={parsed.chat} players={parsed.players} />
             </div>
           )}

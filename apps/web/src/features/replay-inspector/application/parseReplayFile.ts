@@ -101,9 +101,16 @@ export async function parseReplayFile(file: File): Promise<ParsedReplay> {
 
   const mergedMmd: MmdData | undefined = (() => {
     const backendMmd = (raw as any).mmd as MmdData | undefined;
-    if (!backendMmd && !manualFlagsByPid) return undefined;
+    const manualMmd = (diagnostics as any)?.manualMmd as MmdData | undefined;
+    if (!backendMmd && !manualMmd && !manualFlagsByPid) return undefined;
+
     const out: MmdData = { ...(backendMmd ?? {}) };
-    (out as any).flagsByPid = manualFlagsByPid ?? ((backendMmd as any)?.flagsByPid ?? undefined);
+
+    if (manualMmd?.pidToName) out.pidToName = { ...(backendMmd?.pidToName ?? {}), ...manualMmd.pidToName };
+    if (manualMmd?.varsByPid) out.varsByPid = { ...(backendMmd?.varsByPid ?? {}), ...manualMmd.varsByPid };
+    if (manualMmd?.events?.length) out.events = [...(backendMmd?.events ?? []), ...manualMmd.events];
+
+    out.flagsByPid = manualFlagsByPid ?? manualMmd?.flagsByPid ?? backendMmd?.flagsByPid ?? undefined;
     return out;
   })();
 
