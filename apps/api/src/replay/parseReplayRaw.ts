@@ -566,18 +566,28 @@ function parseReplayMetadataFromStream(stream: Uint8Array): ReplayMetadata {
     // fall through to scanners below
   }
 
-  const scannedPlayers = scanPlayerRecordsNearStart(stream);
-  const playersById = new Map<number, PlayerRecord>();
-  for (const row of [...playerRecords, ...scannedPlayers]) {
-    const playerId = toFiniteNumber((row as any)?.playerId);
-    const playerName = cleanPlayerName((row as any)?.playerName);
-    if (playerId == null || !playerName) continue;
-    const prev = playersById.get(playerId);
-    if (!prev || playerName.length > prev.playerName.length) {
-      playersById.set(playerId, { playerId, playerName });
-    }
-  }
+const scannedPlayers = scanPlayerRecordsNearStart(stream);
+const playersById = new Map<number, PlayerRecord>();
 
+// Authoritative source first
+for (const row of playerRecords) {
+  const playerId = toFiniteNumber((row as any)?.playerId);
+  const playerName = cleanPlayerName((row as any)?.playerName);
+  if (playerId == null || !playerName) continue;
+  if (!playersById.has(playerId)) {
+    playersById.set(playerId, { playerId, playerName });
+  }
+}
+
+// Scanner only as fallback
+for (const row of scannedPlayers) {
+  const playerId = toFiniteNumber((row as any)?.playerId);
+  const playerName = cleanPlayerName((row as any)?.playerName);
+  if (playerId == null || !playerName) continue;
+  if (!playersById.has(playerId)) {
+    playersById.set(playerId, { playerId, playerName });
+  }
+}
   const allKnownPlayerIds = new Set<number>(playersById.keys());
 
   if (!slotRecords.length) {

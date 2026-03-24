@@ -194,7 +194,7 @@ export function mapReplayApiToView(
       pid,
       // Preserve backend id separately; it is not used for PID-based lookups.
       id: backendId,
-      slot: rawIdx,
+      slot: typeof p.slot === "number" ? p.slot : rawIdx,
       name,
       team,
       colorHex: typeof p.color === "string" ? p.color : undefined,
